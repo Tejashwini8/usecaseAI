@@ -1,5 +1,3 @@
-# Test change to trigger PR
-
 name: GPT Optimization Review
 
 on:
@@ -22,8 +20,40 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const openai = require("openai");
-            const client = new openai.OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+            async function analyzeWithGPT(code) {
+              const body = {
+                model: "gpt-4o-mini",
+                messages: [
+                  {
+                    role: "user",
+                    content: `
+                    Analyze this code and suggest ways to:
+                    1. Optimize algorithms and conditional logic
+                    2. Reduce memory usage
+                    3. Speed up execution time
+                    Provide concise bullet-point recommendations.
+                    \n\n${code}
+                    `,
+                  },
+                ],
+              };
+
+              const response = await fetch("https://api.openai.com/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer ${process.env.OPENAI_API_KEY}",
+                },
+                body: JSON.stringify(body),
+              });
+
+              if (!response.ok) {
+                throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
+              }
+
+              const data = await response.json();
+              return data.choices?.[0]?.message?.content || "No suggestions found.";
+            }
 
             const { data: files } = await github.pulls.listFiles({
               owner: context.repo.owner,
@@ -33,37 +63,25 @@ jobs:
 
             let code = "";
             for (const file of files) {
-              if (file.filename.endsWith(".js")) code += file.patch + "\n";
+              if (file.filename.endsWith(".js") || file.filename.endsWith(".ts")) {
+                code += `\n\n// FILE: ${file.filename}\n${file.patch}`;
+              }
             }
 
             if (!code) {
-              console.log("No JS files changed. Skipping.");
+              console.log("No JS/TS files changed. Skipping review.");
               return;
             }
 
-            const completion = await client.chat.completions.create({
-              model: "gpt-4o-mini",
-              messages: [{
-                role: "user",
-                content: `
-                Analyze the following code for performance optimizations.
-                Suggest improvements in:
-                - Algorithmic efficiency
-                - Memory usage
-                - Execution speed
-                Code:
-                ${code}
-                `,
-              }],
-            });
-
-            const review = completion.choices[0].message.content;
+            console.log("🔍 Sending code to GPT for optimization review...");
+            const review = await analyzeWithGPT(code);
+            console.log("✅ GPT review received.");
 
             await github.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.pull_request.number,
-              body: "### 🤖 GPT Optimization Review\n" + review,
+              body: `### 🤖 GPT Optimization Review\n${review}`,
             });
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
