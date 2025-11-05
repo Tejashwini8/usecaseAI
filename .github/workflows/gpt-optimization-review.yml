@@ -1,6 +1,6 @@
 # Test change to trigger PR
 
-nname: GPT Optimization Review
+name: GPT Optimization Review
 
 on:
   pull_request:
