@@ -4,19 +4,64 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
-jobs:
-  gpt-review:
-    runs-on: ubuntu-latest
+permissions:
+  contents: read
+  pull-requests: write
 
+jobs:
+  review:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: npm install openai@latest @octokit/rest@latest
+      - name: GPT Optimization Review
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const openai = require("openai");
+            const client = new openai.OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-      - name: Run GPT Optimization Review
+            const { data: files } = await github.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+            });
+
+            let code = "";
+            for (const file of files) {
+              if (file.filename.endsWith(".js")) code += file.patch + "\n";
+            }
+
+            if (!code) {
+              console.log("No JS files changed. Skipping.");
+              return;
+            }
+
+            const completion = await client.chat.completions.create({
+              model: "gpt-4o-mini",
+              messages: [{
+                role: "user",
+                content: `
+                Analyze the following code for performance optimizations.
+                Suggest improvements in:
+                - Algorithmic efficiency
+                - Memory usage
+                - Execution speed
+                Code:
+                ${code}
+                `,
+              }],
+            });
+
+            const review = completion.choices[0].message.content;
+
+            await github.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: "### 🤖 GPT Optimization Review\n" + review,
+            });
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node .github/scripts/gptReview.js
